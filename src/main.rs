@@ -1,93 +1,110 @@
 use reqwest::Client;
 use scraper::{Html, Selector};
-use tokio;
-extern crate base64;
-use std::str;
-
-use tokio::fs::File;
-use tokio::io::AsyncWriteExt;
+use std::fmt::format;
+use std::fs;
+use std::time::{Duration, Instant};
+use teloxide::requests::Requester;
+use teloxide::Bot;
+use teloxide_core::types::*;
 use tokio::time::sleep;
-use std::time::Duration;
 
 #[tokio::main]
 async fn main() {
-    proxyscapper().await;
-    advancedproxy().await;
-    freeproxy().await;
+    let mut start = Instant::now();
+    let timeout_duration = Duration::from_secs(3600);
+
+    // Bot Handler
+    pretty_env_logger::init();
+    let token = "7015908466:AAGQ74yCkuF_I8_zlrI308Cyhby2ajTLup8";
+    let bot = Bot::new(token);
+
+    teloxide::repl(bot, |bot: Bot, msg: Message| async move {
+        let document = InputFile::file("./proxies.txt");
+        bot.send_document(msg.chat.id, document).await?;
+        Ok(())
+    })
+    .await;
+
+    loop {
+        if start.elapsed() >= timeout_duration {
+            if let Err(err) = fs::remove_file("./proxies.txt") {
+                eprintln!("Error deleting file: {}", err);
+            }
+
+            let mut tasks = Vec::new();
+            // Advanced proxy scraping
+            let advanced_proxy_url = "https://advanced.name/freeproxy";
+            let advanced_proxy_tasks = scrape_proxies(
+                advanced_proxy_url,
+                "table#table_proxies tbody tr",
+                "td[data-ip]",
+                "td[data-port]",
+            )
+            .await;
+            tasks.extend(advanced_proxy_tasks);
+
+            // Free proxy scraping
+            let free_proxy_url = "https://free-proxy-list.net/#";
+            let free_proxy_tasks =
+                scrape_proxies(free_proxy_url, "tr", "td:nth-child(1)", "td:nth-child(2)").await;
+            tasks.extend(free_proxy_tasks);
+
+            // Wait for the next timeout before attempting to delete the file again
+            start = Instant::now();
+        }
+        // Adding a delay to reduce CPU usage
+        sleep(Duration::from_secs(30)).await;
+    }
 }
 
-async fn proxyscapper () {
-    let url = "https://api.proxyscrape.com/v3/free-proxy-list/get?request=displayproxies&proxy_format=ipport&format=text";
+async fn scrape_proxies(
+    url: &str,
+    tr_selector: &str,
+    ip_selector: &str,
+    port_selector: &str,
+) -> Vec<String> {
     let client = Client::new();
-    let response = client.get(url).send().await.unwrap();
-    let body = response.text().await.unwrap();
+    let mut tasks = Vec::new();
 
-    println!("{}", body);
-}
+    if let Ok(response) = client.get(url).send().await {
+        if let Ok(body) = response.text().await {
+            let document = Html::parse_document(&body);
+            let ip_selector = Selector::parse(ip_selector).unwrap();
+            let port_selector = Selector::parse(port_selector).unwrap();
 
-
-async fn advancedproxy (){
-    let url = "https://advanced.name/freeproxy";
-    let client = Client::new();
-
-    let response = client.get(url).send().await.unwrap();
-    let body = response.text().await.unwrap();
-    let document = Html::parse_document(&body);
-
-    let tr_selector = Selector::parse("table#table_proxies tbody tr").unwrap();
-    let ip_attr = "data-ip";
-    let port_attr = "data-port";
-
-    for tr in document.select(&tr_selector) {
-        if let Some(ip) = tr.select(&Selector::parse("td[data-ip]").unwrap()).next() {
-            if let Some(port) = tr.select(&Selector::parse("td[data-port]").unwrap()).next() {
-                let ip_text = ip.value().attr(ip_attr).unwrap_or("");
-                let port_text = port.value().attr(port_attr).unwrap_or("");
-                let ip_bytes = base64::decode(ip_text).unwrap();
-                let port_bytes = base64::decode(port_text).unwrap();
-                let ip = str::from_utf8(&ip_bytes).unwrap();
-                let port = str::from_utf8(&port_bytes).unwrap();
-                println!("{}:{}", ip, port);
+            for tr in document.select(&Selector::parse(tr_selector).unwrap()) {
+                if let (Some(ip), Some(port)) = (
+                    tr.select(&ip_selector).next(),
+                    tr.select(&port_selector).next(),
+                ) {
+                    let ip_text = ip.text().collect::<String>();
+                    let port_text = port.text().collect::<String>();
+                    if ip_text.len() + port_text.len() > 13 {
+                        let task = format!("{}:{}", ip_text, port_text);
+                        tasks.push(task);
+                    }
+                }
             }
         }
     }
-}
 
-
-async fn freeproxy() {
-    let url = "https://free-proxy-list.net/#";
-    let client = Client::new();
-
-    let response = client.get(url).send().await.unwrap();
-    let body = response.text().await.unwrap();
-    let document = Html::parse_document(&body);
-
-    let ip_selector = Selector::parse("td:nth-child(1)").unwrap();
-    let port_selector = Selector::parse("td:nth-child(2)").unwrap();
-
-    let mut tasks = vec![];
-
-    for tr in document.select(&Selector::parse("tr").unwrap()) {
-        let ip_element = tr.select(&ip_selector).next();
-        let port_element = tr.select(&port_selector).next();
-
-        if let (Some(ip), Some(port)) = (ip_element, port_element) {
-            let ip_text = ip.text().collect::<Vec<_>>().join("");
-            let port_text = port.text().collect::<Vec<_>>().join("");
-            if ip_text.len() + port_text.len() > 13 {
-                let task = tokio::spawn(async move {
-                    println!("{}:{}", ip_text, port_text);
-                    // let mut file = OpenOptions::new().append(true).open("src/ip.txt").unwrap();
-                    // let outputtext = format!("{}:{} \n", ip_text, port_text);
-                    // file.write_all(outputtext.as_bytes()).unwrap();
-                  
-                });
-                tasks.push(task);
+    // Saving to file
+    if let Ok(mut file) = tokio::fs::OpenOptions::new()
+        .create(true)
+        .write(true)
+        .truncate(true) // Truncate the file to clear its contents
+        .open("proxies.txt")
+        .await
+    {
+        for task in &tasks {
+            if let Err(_) =
+                tokio::io::AsyncWriteExt::write_all(&mut file, format!("{}\n", task).as_bytes())
+                    .await
+            {
+                eprintln!("Error writing proxy to file.");
             }
         }
     }
 
-    for task in tasks {
-        task.await.unwrap();
-    }
+    tasks
 }
