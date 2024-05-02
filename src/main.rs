@@ -1,6 +1,6 @@
+use actix_web::{web, App, HttpResponse, HttpServer};
 use reqwest::Client;
 use scraper::{Html, Selector};
-use std::fmt::format;
 use std::fs;
 use std::time::{Duration, Instant};
 use teloxide::requests::Requester;
@@ -8,8 +8,22 @@ use teloxide::Bot;
 use teloxide_core::types::*;
 use tokio::time::sleep;
 
-#[tokio::main]
-async fn main() {
+#[actix_web::main]
+async fn main() -> std::io::Result<()> {
+    let server = HttpServer::new(|| App::new().route("/", web::get().to(HttpResponse::Ok)))
+        .bind(("127.0.0.1", 8080))?
+        .run()
+        .await;
+
+    match server {
+        Ok(val) => {
+            println!("Server is Started")
+        }
+        Err(err) => {
+            println!("Error {}", err)
+        }
+    }
+
     let mut start = Instant::now();
     let timeout_duration = Duration::from_secs(3600);
 
