@@ -1,3 +1,4 @@
+use actix_web::{get,  App, HttpResponse, HttpServer, Responder};
 use reqwest::Client;
 use scraper::{Html, Selector};
 use std::fs;
@@ -5,28 +6,38 @@ use std::time::{Duration, Instant};
 use teloxide::requests::Requester;
 use teloxide::Bot;
 use teloxide_core::types::*;
-use tokio::time::sleep;
-use std::net::TcpListener;
-use std::net::TcpStream;
-use std::io::prelude::*;
+
+#[get("/")]
+async fn hello() -> impl Responder {
+    HttpResponse::Ok().body("Hello world!")
+}
 
 #[tokio::main]
 async fn main() -> std::io::Result<()> {
-    let listener = TcpListener::bind("127.0.0.1:8080").unwrap();
+
+    let bot = Bot::new("7015908466:AAGQ74yCkuF_I8_zlrI308Cyhby2ajTLup8");
+
+    let _bot_task = tokio::spawn(async move {
+        teloxide::repl(bot, |bot: Bot, msg: Message| async move {
+            let document = InputFile::file("./proxies.txt");
+            bot.send_document(msg.chat.id, document).await?;
+            Ok(())
+        })
+        .await;
+    });
+
+    let port = std::env::var("PORT").unwrap_or("4000".to_string());
+    let server = HttpServer::new(|| {
+        App::new()
+            .service(hello)
+    })
+    .bind(format!("0.0.0.0:{}", port))?
+    .run();
+   
+    let _ = server.await?;
+
     let mut start = Instant::now();
     let timeout_duration = Duration::from_secs(3600);
-
-    // Bot Handler
-    pretty_env_logger::init();
-    let token = "7015908466:AAGQ74yCkuF_I8_zlrI308Cyhby2ajTLup8";
-    let bot = Bot::new(token);
-
-    teloxide::repl(bot, |bot: Bot, msg: Message| async move {
-        let document = InputFile::file("./proxies.txt");
-        bot.send_document(msg.chat.id, document).await?;
-        Ok(())
-    })
-    .await;
 
     loop {
         if start.elapsed() >= timeout_duration {
@@ -55,15 +66,8 @@ async fn main() -> std::io::Result<()> {
             // Wait for the next timeout before attempting to delete the file again
             start = Instant::now();
         }
-        // Adding a delay to reduce CPU usage
-        
-        for stream in listener.incoming() {
-            let stream = stream.unwrap();
-            handle_connection(stream);
-        }
-        
-        sleep(Duration::from_secs(30)).await;
     }
+    
 }
 
 async fn scrape_proxies(
@@ -116,12 +120,4 @@ async fn scrape_proxies(
     }
 
     tasks
-}
-
-fn handle_connection(mut stream: TcpStream) {
-    let mut buffer = [0; 512];
-    stream.read(&mut buffer).unwrap();
-    let response = b"Hello, client!";
-    stream.write(response).unwrap();
-    stream.flush().unwrap();
 }
