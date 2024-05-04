@@ -1,4 +1,3 @@
-use actix_web::{web, App, HttpResponse, HttpServer};
 use reqwest::Client;
 use scraper::{Html, Selector};
 use std::fs;
@@ -7,23 +6,13 @@ use teloxide::requests::Requester;
 use teloxide::Bot;
 use teloxide_core::types::*;
 use tokio::time::sleep;
+use std::net::TcpListener;
+use std::net::TcpStream;
+use std::io::prelude::*;
 
-#[actix_web::main]
+#[tokio::main]
 async fn main() -> std::io::Result<()> {
-    let server = HttpServer::new(|| App::new().route("/", web::get().to(HttpResponse::Ok)))
-        .bind(("127.0.0.1", 8080))?
-        .run()
-        .await;
-
-    match server {
-        Ok(val) => {
-            println!("Server is Started")
-        }
-        Err(err) => {
-            println!("Error {}", err)
-        }
-    }
-
+    let listener = TcpListener::bind("127.0.0.1:8080").unwrap();
     let mut start = Instant::now();
     let timeout_duration = Duration::from_secs(3600);
 
@@ -67,6 +56,12 @@ async fn main() -> std::io::Result<()> {
             start = Instant::now();
         }
         // Adding a delay to reduce CPU usage
+        
+        for stream in listener.incoming() {
+            let stream = stream.unwrap();
+            handle_connection(stream);
+        }
+        
         sleep(Duration::from_secs(30)).await;
     }
 }
@@ -121,4 +116,12 @@ async fn scrape_proxies(
     }
 
     tasks
+}
+
+fn handle_connection(mut stream: TcpStream) {
+    let mut buffer = [0; 512];
+    stream.read(&mut buffer).unwrap();
+    let response = b"Hello, client!";
+    stream.write(response).unwrap();
+    stream.flush().unwrap();
 }
