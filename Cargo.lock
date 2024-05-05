@@ -1890,6 +1890,7 @@ version = "0.1.0"
 dependencies = [
  "actix-web",
  "base64 0.22.1",
+ "futures",
  "pretty_env_logger",
  "rayon",
  "reqwest 0.12.4",
